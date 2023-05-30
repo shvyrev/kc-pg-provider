@@ -1,0 +1,4 @@
+io/shvyrev/model/KcUserEntity.class
+io/shvyrev/model/UserAdapter.class
+io/shvyrev/providers/KcUserStorageProvider.class
+io/shvyrev/providers/KcUserStorageProviderFactory.class
