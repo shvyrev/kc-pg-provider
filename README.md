@@ -1,91 +1,74 @@
-# Keycloak provider for user federation in Postgres
+# kc-pg-provider
 
-This project demonstrates the ability to use Postgres as user storage provider of Keycloak.
+**Keycloak User Storage SPI provider backed by PostgreSQL.**
+
+Lets Keycloak serve users from your own Postgres schema: lookup, registration, credential
+validation and user queries run against a custom `users` table instead of Keycloak's
+built-in store. Useful when an existing user database must stay the source of truth — or when
+user data must live in a schema you control.
+
+Built as a reference implementation while designing enterprise identity integration (AD/LDAP,
+federated stores) for [Atrium](https://atrium-ai.ru), an on-premise LLM platform.
+
+## How it works
+
+Keycloak discovers the provider via standard SPI registration
+(`META-INF/services/org.keycloak.storage.UserStorageProviderFactory`).
+`KcUserStorageProvider` implements:
+
+| Interface | Responsibility |
+|---|---|
+| `UserLookupProvider` | find users by id, username, email |
+| `UserRegistrationProvider` | add / remove users in the external store |
+| `UserQueryProvider` | search users (name, email, search patterns) |
+| `CredentialInputValidator` / `CredentialInputUpdater` | password validation and updates against the external store |
+| `OnUserCache` | participates in Keycloak's user cache invalidation |
+
+Users are exposed to Keycloak through `UserAdapter` over the JPA entity `KcUserEntity`.
+The provider talks to its own JPA connection (`user-store`) pointing at Postgres — it never
+touches Keycloak's internal database.
+
+```
+Keycloak ──SPI──▶ KcUserStorageProvider ──JPA (user-store)──▶ Postgres: users
+```
+
+## Quickstart
+
+```bash
+# build the provider jar, build the Keycloak image, start it
+./sh/run
+```
+
+or step by step:
+
+```bash
+mvn clean install -DskipTests
+docker build -f docker/Dockerfile -t kc-pg-provider .
+docker run -p 8443:8443 kc-pg-provider start-dev
+```
+
+Create the table in Postgres (see `sql/script.sql`):
+
+```sql
+create table if not exists users(
+  id       uuid not null primary key,
+  username varchar(255),
+  password varchar(255)
+);
+```
+
+Then in the Keycloak admin console: **Realm settings → User federation → Add provider →
+kc-pg-provider**. The provider appears in the user-federation list (see
+`docs/images/providers.png`).
+
+## Layout
+
+- `src/main/java/io/shvyrev/providers` — provider and its factory
+- `src/main/java/io/shvyrev/model` — JPA entity and Keycloak `UserModel` adapter
+- `sql/script.sql` — minimal schema
+- `docker/Dockerfile` — Keycloak image with the provider baked in
+- `sh/run`, `sh/pg` — build/run helper scripts
 
 ## Requirements
 
-The following software is required to work build it locally:
-
-* [Git](https://git-scm.com) 2.2.1 or later
-* [Docker Engine](https://docs.docker.com/engine/install/) or [Docker Desktop](https://docs.docker.com/desktop/) 1.9 or later
-* [Maven](https://maven.apache.org/) 3.8.5 or later
-* [Java](https://www.java.com/ru/) 17 or later
-
-See the links above for installation instructions on your platform. You can verify the versions are installed and running:
-
-    $ git --version
-    $ curl -V
-    $ mvn -version
-    $ docker --version
-    $ java --version
-
-## Usage
-### Docker containers
-[Postgres](https://www.postgresql.org/) - database for which we want to store User Federation.
-
-[Keycloak](https://www.keycloak.org/) - KC container with custom certificate, for use over `https`. The container is described in [Dockerfile](/docker/Dockerfile).
-
-### Build SPI provider
-
-Before you build the SPI provider you must add the information about the database. 
-This information is specified in the file [persistence.xml](/src/main/resources/META-INF/persistence.xml#L15)
-
-> :warning: **Replace the URI** `jdbc:postgresql://localhost:5432/keycloak` **with your database address.**
-
-### Using Postgres
-> :warning: **I recommend using your own database**, cause not all systems will have a database at `localhost` available to the `docker` container.
-
-To deploy the container use the script :
-```shell
-$ sh/pg
-```
-
-The script deploys the container locally. 
-
-It uses port : 5432. 
-
-The scripts in the container create a `keycloak` database. 
-In the database create a table `users` :
-```sql
-create table users
-(
-    id uuid not null primary key,
-    username varchar(255),
-    password varchar(255)
-)
-```
-Add mock user to the table.
-
-### Using Keycloak
-
-KC is deployed in a custom container.
-
-To deploy the KC container, I created a [Dockerfile](/docker/Dockerfile) file in which :
-- I create a certificate for `https` access
-- I add a provider `kc-pg-provider`
-
-## Build the project
-
-Run the script :
-```shell
-$ sh/run
-```
-This script will build the SPI provider. 
-
-Deploys the KC container, adds the SPI provider and restarts the container to apply the changes. 
-
-## Login to KC
-
-After launching, go to [https://localhost:8443](https://localhost:8443) in your browser.
-To log in to KC, use admin credentials :
-```properties
-user : admin
-pass : admin
-```
-
-Click the [User federation](https://localhost:8443/admin/master/console/#/master/user-federation) tab .
-
-The provider ``kc-pg-provider`` is in list of providers.
-
-![KC providers](/docs/images/providers.png?raw=true "KC providers")
-
+Git · Java 17+ · Maven 3.8+ · Docker
